@@ -1,4 +1,15 @@
-add-type -Path '.\System.Formats.Cbor.7.0.0\lib\net6.0\System.Formats.Cbor.dll'
+#Sloppy way to load System.Formats.Cbor for either Windows PowerShell or PowerShell Core
+try {
+    add-type -Path (Join-path $PSScriptRoot 'System.Formats.Cbor.7.0.0\lib\net6.0\System.Formats.Cbor.dll') -ErrorAction Stop | Out-Null
+}
+catch {
+}
+try {
+    add-type -Path (Join-path $PSScriptRoot 'System.Formats.Cbor.7.0.0\lib\net6.0\System.Formats.Cbor.dll') -ErrorAction Stop | Out-Null    
+}
+catch {
+}
+
 
 function ConvertFrom-TLV {
     param (
@@ -160,13 +171,13 @@ function Test-SSHAttestationCertificate {
     )
     $Attestation = ConvertFrom-SSHAttestation $AttestationFilePath
 
-    $Root = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $RootCertificatePath
+    $Root = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList (get-item $RootCertificatePath).FullName
     $CertChain = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Chain -ArgumentList $false
     $CertChain.ChainPolicy.TrustMode = 'CustomRootTrust'
     $CertChain.ChainPolicy.RevocationMode = 'NoCheck'
     $CertChain.ChainPolicy.CustomTrustStore.Add($Root) | Out-Null
-    $certChain.Build($Attestation.Certificate) 
-    
+    $result = $certChain.Build($Attestation.Certificate) 
+    $result
 }
 
 function Get-FIDO2Flags {
@@ -281,17 +292,20 @@ $Attestation = ConvertFrom-SSHAttestation .\attestation.bin
 #ConvertFrom-CBOR $Attestation.AuthenticatorData | Format-Hex
 
 #Working Test that Authenticator Data & Challenge was signed by Attestation Certificate
-Test-SSHAttestationSignature -AttestationFilePath .\attestation.bin -ChallengeFilePath .\challengefile
+[PSCustomObject]@{
+    'Attestation Signature Valid' = Test-SSHAttestationSignature -AttestationFilePath .\attestation.bin -ChallengeFilePath .\challengefile
+}  | Format-List
+
 
 #Working Test that Attestation Certificate was signed by Yubico Root 
 if (-not (Test-Path .\yubico-u2f-ca-certs.txt)) {
     Invoke-WebRequest 'https://developers.yubico.com/U2F/yubico-u2f-ca-certs.txt' -OutFile yubico-u2f-ca-certs.txt | Out-Null
 }
-Test-SSHAttestationCertificate -AttestationFilePath .\attestation.bin -RootCertificatePath .\yubico-u2f-ca-certs.txt
+[PSCustomObject]@{
+    'Attestation Certificate Signed by Yubico Root' = (Test-SSHAttestationCertificate -AttestationFilePath .\attestation.bin -RootCertificatePath .\yubico-u2f-ca-certs.txt)
+} | Format-List
 
-
-#$Attestation.AuthenticatorData | Format-Hex
-#ConvertFrom-FIDO2AuthenticatorData $Attestation.AuthenticatorData
+#Dump Authenticator Data
 $AuthenticatorData = ConvertFrom-FIDO2AuthenticatorData $Attestation.AuthenticatorData
 $AuthenticatorData | Format-List
 
@@ -304,4 +318,3 @@ $pubkey+=ConvertTo-TLV -Value (([system.Text.Encoding]::UTF8).GetBytes('ssh:')) 
 $pubkey = [System.Convert]::ToBase64String($pubkey)
 "$keytype $pubkey" | Set-Content sk.pub
 "$keytype $pubkey"
-return
